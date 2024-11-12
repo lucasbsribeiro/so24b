@@ -16,6 +16,29 @@
 // CONSTANTES E TIPOS {{{1
 // intervalo entre interrupções do relógio
 #define INTERVALO_INTERRUPCAO 50   // em instruções executadas
+#define MAX_PROCESSOS 10
+#define PID_VAZIO -1
+
+typedef enum {
+  PRONTO = 0,
+  EXECUTANDO = 1,
+  PARADO = 2,
+  BLOQUEADO = 3
+} estado_processo
+
+typedef enum {
+  KERNEL = 0,
+  USUARIO = 1
+} modo_processo
+
+struct processo_t {
+  int pid;
+  modo_processo modo;
+  estado_processo estado;
+  int pc;
+  int reg_A;
+  int reg_X;
+};
 
 struct so_t {
   cpu_t *cpu;
@@ -23,7 +46,9 @@ struct so_t {
   es_t *es;
   console_t *console;
   bool erro_interno;
-  // t1: tabela de processos, processo corrente, pendências, etc
+  processo_t **tabela_processos;
+  processo_t *processo_corrente;
+  int contador_tabela;
 };
 
 
@@ -48,11 +73,22 @@ so_t *so_cria(cpu_t *cpu, mem_t *mem, es_t *es, console_t *console)
   self->es = es;
   self->console = console;
   self->erro_interno = false;
-
+  self->tabela_processos = malloc(MAX_PROCESSOS * sizeof(*process_t));
+  self->processo_corrente = NULL;
   // quando a CPU executar uma instrução CHAMAC, deve chamar a função
   //   so_trata_interrupcao, com primeiro argumento um ptr para o SO
   cpu_define_chamaC(self->cpu, so_trata_interrupcao, self);
 
+
+  for(int i = 0; i < MAX_PROCESSOS - 1; i++) 
+  {
+    self->tabela_processos[i].pid = PID_VAZIO;
+    self->tabela_processos[i].pc = 0;
+    self->tabela_processos[i].reg_A = 0;
+    self->tabela_processos[i].reg_X = 0;
+    self->tabela_processos[i].modo = USUARIO;
+    self->tabela_processos[i].estado = PRONTO;
+  }
   // coloca o tratador de interrupção na memória
   // quando a CPU aceita uma interrupção, passa para modo supervisor, 
   //   salva seu estado à partir do endereço 0, e desvia para o endereço
@@ -62,13 +98,15 @@ so_t *so_cria(cpu_t *cpu, mem_t *mem, es_t *es, console_t *console)
   //   instrução CHAMAC, que vai chamar so_trata_interrupcao (como
   //   foi definido acima)
   int ender = so_carrega_programa(self, "trata_int.maq");
-  if (ender != IRQ_END_TRATADOR) {
+  if (ender != IRQ_END_TRATADOR) 
+  {
     console_printf("SO: problema na carga do programa de tratamento de interrupção");
     self->erro_interno = true;
   }
 
   // programa o relógio para gerar uma interrupção após INTERVALO_INTERRUPCAO
-  if (es_escreve(self->es, D_RELOGIO_TIMER, INTERVALO_INTERRUPCAO) != ERR_OK) {
+  if (es_escreve(self->es, D_RELOGIO_TIMER, INTERVALO_INTERRUPCAO) != ERR_OK) 
+  {
     console_printf("SO: problema na programação do timer");
     self->erro_interno = true;
   }
@@ -126,6 +164,11 @@ static int so_trata_interrupcao(void *argC, int reg_A)
 
 static void so_salva_estado_da_cpu(so_t *self)
 {
+  if(self->processo_corrente == NULL) return;
+
+  mem_le(self->mem, IRQ_END_PC, &(self->processo_corrente->pc));
+  mem_le(self->mem, IRQ_END_A, &(self->processo_corrente->reg_A));
+  mem_le(self->mem, IRQ_END_X, &(self->processo_corrente->reg_X));
   // t1: salva os registradores que compõem o estado da cpu no descritor do
   //   processo corrente. os valores dos registradores foram colocados pela
   //   CPU na memória, nos endereços IRQ_END_*
@@ -147,6 +190,7 @@ static void so_escalona(so_t *self)
   //   corrente; pode continuar sendo o mesmo de antes ou não
   // t1: na primeira versão, escolhe um processo caso o processo corrente não possa continuar
   //   executando. depois, implementar escalonador melhor
+
 }
 
 static int so_despacha(so_t *self)
@@ -387,7 +431,8 @@ static void so_chamada_cria_proc(so_t *self)
   if (mem_le(self->mem, IRQ_END_X, &ender_proc) == ERR_OK) {
     char nome[100];
     if (copia_str_da_mem(100, nome, self->mem, ender_proc)) {
-      int ender_carga = so_carrega_programa(self, nome);
+      processo_t *novo_processo = so_cria_processo(self, nome);
+      int ender_carga = novo_processo->pc;
       if (ender_carga > 0) {
         // t1: deveria escrever no PC do descritor do processo criado
         mem_escreve(self->mem, IRQ_END_PC, ender_carga);
@@ -448,6 +493,29 @@ static int so_carrega_programa(so_t *self, char *nome_do_executavel)
   return end_ini;
 }
 
+processo_t *inicializa_processo(int pid, int pc)
+{
+  processo_t *novo_processo = malloc(sizeof(*processo_t));
+  novo_processo->pid = pid;
+  novo_processo->pc = pc;
+  novo_processo->reg_A = 0;
+  novo_processo->reg_X = 0;
+  novo_processo->estado = PRONTO;
+  novo_processo->modo = USUARIO;
+  return novo_processo;
+}
+
+
+processo_t *so_cria_processo(so_t *self, char *nome)
+{
+  int endereco = so_carrega_programa(self, nome);
+  processo_t *novo_processo = inicializa_processo(self->contador_tabela, endereco);
+
+  self->tabela_processos[self->contador_tabela] = novo_processo;
+  contador_tabela++;
+  return processo;
+}
+
 // ACESSO À MEMÓRIA DOS PROCESSOS {{{1
 
 // copia uma string da memória do simulador para o vetor str.
@@ -472,5 +540,7 @@ static bool copia_str_da_mem(int tam, char str[tam], mem_t *mem, int ender)
   // estourou o tamanho de str
   return false;
 }
+
+
 
 // vim: foldmethod=marker
