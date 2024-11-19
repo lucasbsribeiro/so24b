@@ -7,6 +7,9 @@
 #define SO_H
 
 typedef struct so_t so_t;
+typedef struct processo_t processo_t;
+
+
 
 #include "memoria.h"
 #include "cpu.h"

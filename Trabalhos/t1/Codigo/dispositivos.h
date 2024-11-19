@@ -1,4 +1,4 @@
-// dispositivos.h
+  // dispositivos.h
 // identificação dos dispositivos de entrada e saída
 // simulador de computador
 // so24b
