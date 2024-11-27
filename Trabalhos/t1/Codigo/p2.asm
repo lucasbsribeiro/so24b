@@ -3,11 +3,11 @@
 ; faz chamadas de sistema para E/S
 
 ; uso intermediário entre CPU e E/S
-N        define 100 ; até quanto vai contar
+N        define 200  ; até quanto vai contar
 CADA     define 25   ; a cada tantos, imprime o valor atual
 
          desv main
-prog     string 'p2  (média CPU, média E/S) '
+prog     string 'p2  (média CPU, média E/S)                                         '
 
 ; chamadas de sistema (ver so.h)
 SO_LE          define 1

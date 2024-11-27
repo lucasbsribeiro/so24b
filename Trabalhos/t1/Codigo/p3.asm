@@ -3,11 +3,11 @@
 ; faz chamadas de sistema para E/S
 
 ; usa pouca CPU e bastante E/S
-N        define 10  ; até quanto vai contar
+N        define 50  ; até quanto vai contar
 CADA     define 1   ; a cada tantos, imprime o valor atual
 
          desv main
-prog     string 'p3  (pouca CPU, bastante E/S) '
+prog     string 'p3  (pouca CPU, bastante E/S)                                      '
 
 ; chamadas de sistema (ver so.h)
 SO_LE          define 1
