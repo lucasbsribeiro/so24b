@@ -10,6 +10,7 @@
 #include "programa.h"
 #include "instrucao.h"
 #include "memoria.h"
+#include "processo.h"
 
 #include <stdlib.h>
 #include <stdbool.h>
@@ -18,40 +19,6 @@
 // intervalo entre interrupções do relógio
 #define INTERVALO_INTERRUPCAO 50   // em instruções executadas
 #define MAX_PROCESSOS 10
-#define PID_VAZIO -1
-
-
-typedef enum motivo_bloqueio {
-  OK = 1,
-  LEITURA = 2,
-  ESCRITA = 3,
-  ESPERANDO_MORTE = 4
-}motivo_bloqueio;
-
-typedef enum estado_processo {
-  PRONTO = 1,
-  EXECUTANDO = 2,
-  BLOQUEADO = 3,
-  MORTO = 4
-}estado_processo;
-
-
-typedef enum modo_processo {
-  KERNEL = 0,
-  USUARIO = 1
-}modo_processo;
-
-struct processo_t {
-  int pid;
-  modo_processo modo;
-  estado_processo estado;
-  int pc;
-  int reg_a;
-  int reg_x;
-  int terminal;
-  int pid_esperado;
-  motivo_bloqueio motivo;
-};
 
 struct so_t {
   cpu_t *cpu;
@@ -63,41 +30,6 @@ struct so_t {
   processo_t *processo_corrente;
   int contador_tabela;
 };
-
-int get_pid(processo_t *processo)
-{
-  return processo->pid;
-}
-
-int get_pc(processo_t *processo)
-{
-  return processo->pc;
-}
-
-int get_a(processo_t *processo)
-{
-  return processo->reg_a;
-}
-
-int get_x(processo_t *processo)
-{
-  return processo->reg_x;
-}
-
-void set_pc(processo_t *processo, int valor)
-{
-  processo->pc = valor;
-}
-
-void set_a(processo_t *processo, int valor)
-{
-  processo->reg_a = valor;
-}
-
-void set_x(processo_t *processo, int valor)
-{
-  processo->reg_x = valor;
-}
 
 // função de tratamento de interrupção (entrada no SO)
 static int so_trata_interrupcao(void *argC, int reg_a);
@@ -131,14 +63,13 @@ int so_calcula_terminal(int terminal, int tipo)
 processo_t *so_inicializa_processo(int pid, int pc)
 {
   processo_t *novo_processo = malloc(sizeof(processo_t));
-  novo_processo->pid = pid;
-  novo_processo->pc = pc;
-  novo_processo->reg_a = 0;
-  novo_processo->reg_x = 0;
-  novo_processo->estado = PRONTO;
-  novo_processo->modo = USUARIO;
-
-  novo_processo->terminal = (pid % 4) * 4;
+  set_pid(novo_processo, pid);
+  set_pc(novo_processo, pc);
+  set_a(novo_processo, 0);
+  set_x(novo_processo, 0);
+  set_estado(novo_processo, PRONTO);
+  set_modo(novo_processo, USUARIO);
+  set_terminal(novo_processo, (pid % 4) * 4);
 
   return novo_processo;
 }
@@ -243,20 +174,20 @@ void printa_processos(so_t *self)
 {
   if (!self || !self->processo_corrente || !self->tabela_processos) 
   {
-    console_printf("Erro: Ponteiro nulo detectado!\n");
     return;
   }
 
   processo_t *corrente = self->processo_corrente;
-  console_printf("PROC CORR - PID: %d - MODO: %d  - ESTADO: %d - REG A: %d REG X: %c PID ESP: %d\n------------------------------------------",
-  get_pid(corrente), corrente->modo, corrente->estado, get_pc(corrente), get_a(corrente), get_x(corrente), corrente->pid_esperado);
+  console_printf("PROC CORR - PID: %d - MODO: %d  - ESTADO: %d - REG A: %d REG X: %d PID ESP: %d\n------------------------------------------",
+  get_pid(corrente), get_modo(corrente), get_estado(corrente), get_pc(corrente), get_a(corrente), get_x(corrente), get_pid_esp(corrente));
 
   for(int i = 0; i < self->contador_tabela - 1; i++)
   {
+    processo_t *processo = self->tabela_processos[i];
     console_printf("PROCESSO %d - PID: %d - MODO: %d - ESTADO: %d - REG A: %d - REG X: %c  PID ESP: %d\n",
-    i+1, self->tabela_processos[i]->pid, self->tabela_processos[i]->modo, self->tabela_processos[i]->estado, self->tabela_processos[i]->reg_a,
-    self->tabela_processos[i]->reg_x, self->tabela_processos[i]->pid_esperado);
+    i+1, get_pid(processo), get_modo(processo), get_estado(processo), get_pc(processo), get_a(processo), get_x(processo), get_pid_esp(processo));
   }
+  console_printf("\n");
 }
 
 
@@ -301,12 +232,13 @@ static void so_salva_estado_da_cpu(so_t *self)
 void verifica_leitura(so_t *self, processo_t *processo)
 {
   int estado;
-  int terminal = processo->terminal;
+  int terminal = get_terminal(processo);
 
   if(es_le(self->es, so_calcula_terminal(terminal, TECLADO_OK), &estado) == ERR_OK && estado != 0) 
   {
-    processo->estado = PRONTO;
-    processo->motivo = OK;
+    set_estado(processo, PRONTO);
+    set_motivo_bloq(processo, OK);
+    set_a(processo, 0);
   }
 
   return;
@@ -315,7 +247,8 @@ void verifica_leitura(so_t *self, processo_t *processo)
 void verifica_escrita(so_t *self, processo_t *processo)
 {
   int estado;
-  int terminal = processo->terminal;
+  int terminal = get_terminal(processo);
+
 
   if(es_le(self->es, so_calcula_terminal(terminal, TELA_OK), &estado) != ERR_OK) {
       console_printf("SO: problema no acesso ao estado da tela");
@@ -328,9 +261,10 @@ void verifica_escrita(so_t *self, processo_t *processo)
 
   if(es_escreve(self->es, so_calcula_terminal(terminal, TELA), dado) == ERR_OK)
   {
-    //console_printf("RESOLVENDO PENDENCIA DO PROCESSO %d COM O VALOR %c", processo->pid, dado);
-    processo->estado = PRONTO;
-    processo->motivo = OK;
+    console_printf("RESOLVENDO PENDENCIA DO PROCESSO %d COM O VALOR %c", processo->pid, dado);
+    set_estado(processo, PRONTO);
+    set_motivo_bloq(processo, OK);
+    set_a(processo, 0);
   } 
   return;
 }
@@ -341,8 +275,9 @@ void verifica_morte(so_t *self, processo_t *processo)
   processo_t *processo_esperado = so_busca_processo(self, get_x(processo));
   if(processo_esperado->estado == MORTO) 
   {
-    processo->estado = PRONTO;
-    processo->motivo = OK;
+    set_estado(processo, PRONTO);
+    set_motivo_bloq(processo, OK);
+    set_a(processo, 0);
     return;
   }
 }
@@ -362,7 +297,7 @@ static void so_trata_pendencias(so_t *self)
     processo_t *processo_bloqueado = self->tabela_processos[i];
     if(processo_bloqueado != NULL && processo_bloqueado->estado == BLOQUEADO)
     {
-      int motivo = processo_bloqueado->motivo;
+      int motivo = get_motivo_bloq(processo_bloqueado);
       switch (motivo)
       {
       case LEITURA:
@@ -387,10 +322,12 @@ static void so_escalona(so_t *self)
   //   corrente; pode continuar sendo o mesmo de antes ou não
   // t1: na primeira versão, escolhe um processo caso o processo corrente não possa continuar
   //   executando. depois, implementar escalonador melhor
+  
   if(self->processo_corrente != NULL && self->processo_corrente->estado == EXECUTANDO) return;
 
   for(int i = 0; i < self->contador_tabela - 1; i++)
   {
+
     if(self->tabela_processos[i]->estado == PRONTO)
     {
       self->tabela_processos[i]->estado = EXECUTANDO;
@@ -398,6 +335,7 @@ static void so_escalona(so_t *self)
       return;
     }
   }
+  self->processo_corrente = NULL;
 }
 
 static int so_despacha(so_t *self)
@@ -590,7 +528,7 @@ static void so_chamada_le(so_t *self)
 static void so_chamada_escr(so_t *self)
 {
   processo_t *corrente = self->processo_corrente;
-  int terminal = corrente->terminal;
+  int terminal = get_terminal(corrente);
  
   int estado;
 
@@ -602,12 +540,10 @@ static void so_chamada_escr(so_t *self)
 
   if (estado == 0) 
   {
-    corrente->estado = BLOQUEADO;
-    corrente->motivo = ESCRITA;
+    set_estado(corrente, BLOQUEADO);
+    set_motivo_bloq(corrente, ESCRITA);
     return;
   }
-
-  if(corrente->estado == BLOQUEADO) return;
 
   int dado = get_x(corrente);
 
@@ -616,7 +552,7 @@ static void so_chamada_escr(so_t *self)
     self->erro_interno = true;
     return;
   }
-  mem_escreve(self->mem, IRQ_END_A, 0);
+  set_a(corrente, 0);
 }
 
 // implementação da chamada se sistema SO_CRIA_PROC
@@ -652,7 +588,7 @@ void mata_processo(so_t *self, int pid)
   processo_t *processo = so_busca_processo(self, pid);
   if (processo != NULL) 
   {
-    processo->estado = MORTO;
+    set_estado(processo, MORTO);
   }
   set_a(processo, 0);
 }
@@ -669,7 +605,7 @@ static void so_chamada_mata_proc(so_t *self)
   
   else if(corrente != NULL) mata_processo(self, pid_matarao);
 
-  else mem_escreve(self->mem, IRQ_END_A, -1);
+  else set_a(corrente, -1);
 }
 
 // implementação da chamada se sistema SO_ESPERA_PROC
@@ -682,15 +618,15 @@ static void so_chamada_espera_proc(so_t *self)
   processo_t *corrente = self->processo_corrente;
   if(corrente != NULL)
   {
-    corrente->estado = BLOQUEADO;
-    corrente->motivo = ESPERANDO_MORTE;
+    set_estado(corrente, BLOQUEADO);
+    set_motivo_bloq(corrente, ESPERANDO_MORTE);
     pid_esperado = get_x(self->processo_corrente);
-    corrente->pid_esperado = pid_esperado;
+    set_pid_esp(corrente, pid_esperado);
     return;
   } 
   
   //console_printf("SO: SO_ESPERA_PROC não implementada");
-  mem_escreve(self->mem, IRQ_END_A, -1);
+ set_a(corrente, -1);
 }
 
 // CARGA DE PROGRAMA {{{1
