@@ -17,6 +17,14 @@ typedef enum modo_processo {
   USUARIO = 1
 }modo_processo;
 
+typedef struct metricas_processo {
+  int tempo_retorno;
+  int preempcoes;
+  int num_estado[3];
+  int tempo_estado[3];
+  int tempo_resposta;
+} metricas_processo;
+
 typedef struct processo_t {
   int pid;
   modo_processo modo;
@@ -27,6 +35,8 @@ typedef struct processo_t {
   int terminal;
   int pid_esperado;
   motivo_bloqueio motivo;
+  double prioridade;
+  metricas_processo metricas;
 } processo_t;
 
 // getters
@@ -39,6 +49,7 @@ int get_x(processo_t *processo);
 int get_terminal(processo_t *processo);
 int get_pid_esp(processo_t *processo);
 int get_motivo_bloq(processo_t *processo);
+double get_prioridade(processo_t *processo);
 
 // setters
 void set_pid(processo_t *processo, int valor);
@@ -50,3 +61,4 @@ void set_x(processo_t *processo, int valor);
 void set_terminal(processo_t *processo, int valor);
 void set_pid_esp(processo_t *processo, int valor);
 void set_motivo_bloq(processo_t *processo, int valor);
+void set_prioridade(processo_t *processo, double valor);

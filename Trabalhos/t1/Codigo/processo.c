@@ -36,6 +36,10 @@ int get_motivo_bloq(processo_t *processo)
 {
   return processo->motivo;
 }
+double get_prioridade(processo_t *processo)
+{
+  return processo->prioridade;
+}
 
 
 void set_pid(processo_t *processo, int valor)
@@ -73,5 +77,9 @@ void set_pid_esp(processo_t *processo, int valor)
 void set_motivo_bloq(processo_t *processo, int valor)
 {
   processo->motivo = valor;
+}
+void set_prioridade(processo_t *processo, double valor)
+{
+  processo->prioridade = valor;
 }
 
