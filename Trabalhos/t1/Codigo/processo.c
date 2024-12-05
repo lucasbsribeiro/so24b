@@ -1,4 +1,5 @@
 #include "processo.h"
+#include "console.h"
 
 int get_pid(processo_t *processo)
 {
@@ -57,6 +58,20 @@ void set_modo(processo_t *processo, int valor)
 void set_estado(processo_t *processo, int valor)
 {
   processo->estado = valor;
+  switch (valor)
+  {
+  case PRONTO:
+    processo->metricas.num_estado_pronto++;
+    break;
+  case EXECUTANDO:
+    processo->metricas.num_estado_executando++;
+    break;
+  case BLOQUEADO:
+    processo->metricas.num_estado_bloqueado++;
+    break;
+  default:
+    break;
+  }
 }
 void set_a(processo_t *processo, int valor)
 {

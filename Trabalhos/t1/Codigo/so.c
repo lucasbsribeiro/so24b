@@ -22,7 +22,7 @@
 #define MAX_PROCESSOS 10
 #define QUANTUM 10
 
-#define ESCALONADOR 3
+#define ESCALONADOR 2
 
 #define ESCALONADOR_BASE 1
 #define ESCALONADOR_CIRCULAR 2
@@ -31,7 +31,7 @@
 typedef struct metricas_so {
   int total_processos;
   int total_preempcoes;
-  int total_interrupcoes[5];
+  int total_interrupcoes[N_IRQ];
   int tempo_total;
   int tempo_total_ocioso;
 } metricas_so_t;
@@ -45,7 +45,7 @@ typedef struct so_t {
   processo_t **tabela_processos;
   processo_t **fila_prontos;
   processo_t *processo_corrente;
-  int contador_tabela;
+  int contador_pid;
   int quantum;
   int relogio;
   metricas_so_t metricas_so;
@@ -67,7 +67,7 @@ void remove_fila(so_t *self);
 
 processo_t *so_busca_processo(so_t *self, int pid)
 {
-  for(int i = 0; i < self->contador_tabela - 1; i++)
+  for(int i = 0; i < self->contador_pid - 1; i++)
   {
     if(self->tabela_processos[i]->pid == pid)
     {
@@ -89,12 +89,13 @@ static void inicializa_metricas_processo(processo_t *processo)
   processo->metricas.preempcoes = 0;
   processo->metricas.tempo_resposta = 0;
 
-  for(int i = 0; i < 3; i++)
-  {
-  processo->metricas.num_estado[i] = 0;
-  processo->metricas.tempo_estado[i] = 0;
-  }
-  processo->metricas.num_estado[PRONTO] = 1;
+  processo->metricas.num_estado_pronto = 1;
+  processo->metricas.tempo_estado_pronto = 0;
+  processo->metricas.num_estado_executando = 0;
+  processo->metricas.tempo_estado_executando = 0;
+  processo->metricas.num_estado_bloqueado = 0;
+  processo->metricas.tempo_estado_bloqueado = 0;
+
 }
 
 processo_t *so_inicializa_processo(int pid, int pc)
@@ -107,7 +108,7 @@ processo_t *so_inicializa_processo(int pid, int pc)
   set_estado(novo_processo, PRONTO);
   set_motivo_bloq(novo_processo, OK);
   set_modo(novo_processo, USUARIO);
-  set_terminal(novo_processo, (pid % 4) * 4);
+  set_terminal(novo_processo, ((pid - 1) % 4) * 4);
   set_prioridade(novo_processo, 0.5);
   inicializa_metricas_processo(novo_processo);
 
@@ -120,7 +121,7 @@ processo_t *so_cria_processo(so_t *self, char *nome_programa)
   int endereco = so_carrega_programa(self, nome_programa);
   if (endereco == -1) return NULL;
 
-  processo_t *novo_processo = so_inicializa_processo(self->contador_tabela, endereco);
+  processo_t *novo_processo = so_inicializa_processo(self->contador_pid, endereco);
   if(novo_processo == NULL) return NULL;
 
   for(int i = 0; i < MAX_PROCESSOS - 1; i++)
@@ -128,7 +129,7 @@ processo_t *so_cria_processo(so_t *self, char *nome_programa)
     if(self->tabela_processos[i] == NULL)
     {
       self->tabela_processos[i] = novo_processo;
-      self->contador_tabela++;
+      self->contador_pid++;
       break;
     }
   }
@@ -143,41 +144,65 @@ static void inicializa_metricas_so(so_t *self)
   self->metricas_so.tempo_total = 0;
   self->metricas_so.tempo_total_ocioso = 0;
 
-  for(int i = 0; i < 5; i++)
+  for(int i = 0; i < N_IRQ; i++)
   {
   self->metricas_so.total_interrupcoes[i] = 0;
   }
 }
 
-static void atualiza_metricas_processo(processo_t *proc, int d_tempo){
-  if(proc == NULL) return;
-  if (proc->estado != MORTO){
-    proc->metricas.tempo_retorno += d_tempo;
+static void atualiza_metricas_processo(processo_t *processo, int tempo_decorrido)
+{
+  if(processo == NULL) return;
+  if (processo->estado != MORTO){
+    processo->metricas.tempo_retorno += tempo_decorrido;
   }
-  proc->metricas.tempo_estado[proc->estado] += d_tempo;
-  proc->metricas.tempo_resposta = proc->metricas.tempo_estado[PRONTO] / proc->metricas.num_estado[PRONTO];
+  int estado = get_estado(processo);
+  switch (estado)
+  {
+  case PRONTO:
+    processo->metricas.tempo_estado_pronto += tempo_decorrido;
+    break;
+
+  case EXECUTANDO:
+    processo->metricas.tempo_estado_executando += tempo_decorrido;
+    break;
+
+    case BLOQUEADO:
+    processo->metricas.tempo_estado_bloqueado += tempo_decorrido;
+    break;
+
+  default:
+    break;
+  }
+  processo->metricas.tempo_resposta = processo->metricas.tempo_estado_pronto / processo->metricas.num_estado_pronto;
 }
 
-static void atualiza_metricas_so(so_t *self, int d_tempo){
-  self->metricas_so.tempo_total += d_tempo;
-  if (self->processo_corrente == NULL){
-    self->metricas_so.tempo_total_ocioso += d_tempo;
+static void atualiza_metricas_so(so_t *self, int tempo_decorrido)
+{
+  self->metricas_so.tempo_total += tempo_decorrido;
+  if (self->processo_corrente == NULL)
+  {
+    self->metricas_so.tempo_total_ocioso += tempo_decorrido;
   }
-  for (int i = 0; i < self->contador_tabela - 1; i++){
-    atualiza_metricas_processo(self->tabela_processos[i], d_tempo);
+  for (int i = 0; i < self->contador_pid - 1; i++)
+  {
+    atualiza_metricas_processo(self->tabela_processos[i], tempo_decorrido);
   }
 }
 
-static void calcula_metricas(so_t *self){
+static void calcula_metricas(so_t *self)
+{
   int relogio_ant = self->relogio;
-  if (es_le(self->es, D_RELOGIO_INSTRUCOES, &self->relogio) != ERR_OK){
+  if (es_le(self->es, D_RELOGIO_INSTRUCOES, &self->relogio) != ERR_OK)
+  {
     console_printf("SO: problema no acesso ao relógio");
     return;
   }
 
-  if (relogio_ant != -1){
-    int dif = self->relogio - relogio_ant;
-    atualiza_metricas_so(self, dif);
+  if (relogio_ant != -1)
+  {
+    int tempo_decorrido = self->relogio - relogio_ant;
+    atualiza_metricas_so(self, tempo_decorrido);
   }
 }
 
@@ -195,7 +220,7 @@ so_t *so_cria(cpu_t *cpu, mem_t *mem, es_t *es, console_t *console)
   self->tabela_processos = malloc(MAX_PROCESSOS * sizeof(processo_t));
   self->fila_prontos = malloc (MAX_PROCESSOS * sizeof(processo_t));
   self->processo_corrente = NULL;
-  self->contador_tabela = 1;
+  self->contador_pid = 1;
   self->quantum = QUANTUM;
   self->relogio = -1;
   inicializa_metricas_so(self);
@@ -270,16 +295,11 @@ void printa_processos(so_t *self)
   console_printf("PROC CORR - PID: %d - MODO: %d  - ESTADO: %d - REG A: %d PID ESP: %d\n------------------------------------------",
   get_pid(corrente), get_modo(corrente), get_estado(corrente), get_pc(corrente), get_a(corrente), get_pid_esp(corrente));
 
-  /*for(int i = 0; i < self->contador_tabela - 1; i++)
+  for(int i = 0; i < self->contador_pid - 1; i++)
   {
     processo_t *processo = self->tabela_processos[i];
-    console_printf("PROCESSO %d PID: %d MODO: %d ESTADO: %d REG A: %d PID ESP: %d\n",
-    i+1, get_pid(processo), get_modo(processo), get_estado(processo), get_pc(processo), get_a(processo), get_pid_esp(processo));
-  }*/
-  for(int i = 0; i < self->contador_tabela - 1; i++)
-  {
-    processo_t *processo = self->tabela_processos[i];
-    console_printf("PROCESSO %d PID: %d ESTADO: %d PRIORIDADE: %f", i+1, processo->pid, processo->estado, processo->prioridade);
+    console_printf("PROCESSO PID: %d MODO: %d ESTADO: %d REG A: %d PID ESP: %d\n",get_pid(processo), get_modo(processo), get_estado(processo), 
+                                                                                  get_a(processo), get_pid_esp(processo));
   }
 
   console_printf("\n");
@@ -288,7 +308,7 @@ void printa_processos(so_t *self)
 int get_total_preempcoes(so_t *self)
 {
   int total_preempcoes = 0;
-  for(int i = 0; i < self->contador_tabela - 1; i++)
+  for(int i = 0; i < self->contador_pid - 1; i++)
   {
     processo_t *processo = self->tabela_processos[i];
     total_preempcoes += processo->metricas.preempcoes;
@@ -313,42 +333,59 @@ static void printa_metricas(so_t *self)
     }
 
     // Imprime métricas gerais
-    fprintf(arq, "*** METRICAS SISTEMA OPERACIONAL ***\n");
-    fprintf(arq, "Tempo total em execucao: %d\n", self->metricas_so.tempo_total);
-    fprintf(arq, "Tempo total ocioso: %d\n", self->metricas_so.tempo_total_ocioso);
-    fprintf(arq, "Numero total de processos: %d\n", self->contador_tabela);
-    fprintf(arq, "Numero total de preempcoes: %d\n", self->metricas_so.total_preempcoes);
+    fprintf(arq, "=====================================================\n");
+    fprintf(arq, "               MÉTRICAS DO SISTEMA OPERACIONAL       \n");
+    fprintf(arq, "=====================================================\n");
+    fprintf(arq, " Tempo total em execução     : %d\n", self->metricas_so.tempo_total);
+    fprintf(arq, " Tempo total ocioso          : %d\n", self->metricas_so.tempo_total_ocioso);
+    fprintf(arq, " Número total de processos   : %d\n", self->contador_pid - 1);
+    fprintf(arq, " Número total de preempções  : %d\n", self->metricas_so.total_preempcoes);
+    fprintf(arq, "\n");
 
-    for (int i = 0; i < 5; i++) {
-        fprintf(arq, "Numero total de interrupcoes tipo %d: %d\n", i, self->metricas_so.total_interrupcoes[i]);
+    for (int i = 0; i < N_IRQ; i++) {
+        fprintf(arq, " Interrupções tipo %d         : %d\n", i, self->metricas_so.total_interrupcoes[i]);
     }
 
-    // Imprime métricas de processos
-    fprintf(arq, "*** METRICAS PROCESSOS ***\n");
-    for (int i = 0; i < self->contador_tabela; i++) {
+    fprintf(arq, "\n=====================================================\n");
+    fprintf(arq, "               MÉTRICAS DOS PROCESSOS                \n");
+    fprintf(arq, "=====================================================\n");
+
+    // Imprime métricas por processo
+    for (int i = 0; i < self->contador_pid - 1; i++) {
         if (self->tabela_processos == NULL || self->tabela_processos[i] == NULL) {
             console_printf("SO: processo na tabela está inválido\n");
             continue;
         }
 
         processo_t *processo = self->tabela_processos[i];
-        fprintf(arq, "Processo PID %d\n", processo->pid);
-        fprintf(arq, "Tempo de retorno: %d\n", processo->metricas.tempo_retorno);
-        fprintf(arq, "Tempo medio de resposta: %d\n", processo->metricas.tempo_resposta);
-        fprintf(arq, "Numero de preempcoes: %d\n", processo->metricas.preempcoes);
-
-        for (int j = 0; j < 3; j++) {
-            fprintf(arq, "Numero de vezes no estado %d: %d\n", j, processo->metricas.num_estado[j]);
-            fprintf(arq, "Tempo no estado %d: %d\n", j, processo->metricas.tempo_estado[j]);
-        }
+        fprintf(arq, "-----------------------------------------------------\n");
+        fprintf(arq, " Processo PID                  : %d\n", processo->pid);
+        fprintf(arq, " Tempo de retorno              : %d\n", processo->metricas.tempo_retorno);
+        fprintf(arq, " Tempo médio de resposta       : %d\n", processo->metricas.tempo_resposta);
+        fprintf(arq, " Número de preempções          : %d\n", processo->metricas.preempcoes);
         fprintf(arq, "\n");
+
+        fprintf(arq, " Estado PRONTO:\n");
+        fprintf(arq, "   - Vezes no estado           : %d\n", processo->metricas.num_estado_pronto);
+        fprintf(arq, "   - Tempo no estado           : %d\n", processo->metricas.tempo_estado_pronto);
+        fprintf(arq, "\n");
+
+        fprintf(arq, " Estado EXECUTANDO:\n");
+        fprintf(arq, "   - Vezes no estado           : %d\n", processo->metricas.num_estado_executando);
+        fprintf(arq, "   - Tempo no estado           : %d\n", processo->metricas.tempo_estado_executando);
+        fprintf(arq, "\n");
+
+        fprintf(arq, " Estado BLOQUEADO:\n");
+        fprintf(arq, "   - Vezes no estado           : %d\n", processo->metricas.num_estado_bloqueado);
+        fprintf(arq, "   - Tempo no estado           : %d\n", processo->metricas.tempo_estado_bloqueado);
+        fprintf(arq, "-----------------------------------------------------\n");
     }
+
+    fprintf(arq, "=====================================================\n");
 
     // Fecha o arquivo
     fclose(arq);
 }
-
-
 
 static int termina_so(so_t *self)
 {
@@ -368,7 +405,7 @@ static int so_trata_interrupcao(void *argC, int reg_a)
 {
   so_t *self = argC;
   irq_t irq = reg_a;
-  //printa_processos(self);
+  printa_processos(self);
   // esse print polui bastante, recomendo tirar quando estiver com mais confiança
   //console_printf("SO: recebi IRQ %d (%s)", irq, irq_nome(irq));
   calcula_metricas(self);
@@ -381,7 +418,7 @@ static int so_trata_interrupcao(void *argC, int reg_a)
   // escolhe o próximo processo a executar
   so_escalona(self);
   // recupera o estado do processo escolhido
-  for(int i = 0; i < self->contador_tabela - 1; i++)
+  for(int i = 0; i < self->contador_pid - 1; i++)
   {
     if(self->tabela_processos[i]->estado != MORTO) return so_despacha(self);
   }
@@ -440,7 +477,6 @@ void verifica_leitura(so_t *self, processo_t *processo)
     set_motivo_bloq(processo, OK);
     set_a(processo, 0);
     adiciona_fila(self, processo);
-    processo->metricas.num_estado[processo->estado]++;
   }
 
   return;
@@ -467,8 +503,6 @@ void verifica_escrita(so_t *self, processo_t *processo)
     set_motivo_bloq(processo, OK);
     set_a(processo, 0);
     adiciona_fila(self, processo);
-    processo->metricas.num_estado[processo->estado]++;
-
   } 
   return;
 }
@@ -476,14 +510,13 @@ void verifica_escrita(so_t *self, processo_t *processo)
 
 void verifica_morte(so_t *self, processo_t *processo)
 {
-  processo_t *processo_esperado = so_busca_processo(self, get_x(processo));
+  processo_t *processo_esperado = so_busca_processo(self, get_pid_esp(processo));
   if(processo_esperado->estado == MORTO) 
   {
     set_estado(processo, PRONTO);
     set_motivo_bloq(processo, OK);
     set_a(processo, 0);
     adiciona_fila(self, processo);
-    processo->metricas.num_estado[processo->estado]++;
     return;
   }
 }
@@ -498,23 +531,28 @@ static void so_trata_pendencias(so_t *self)
   // - contabilidades
   if(!self->tabela_processos) return;
 
-  for(int i = 0; i < self->contador_tabela - 1; i++)
+  for(int i = 0; i < self->contador_pid - 1; i++)
   {
     processo_t *processo_bloqueado = self->tabela_processos[i];
+
     if(processo_bloqueado != NULL && processo_bloqueado->estado == BLOQUEADO)
     {
       int motivo = get_motivo_bloq(processo_bloqueado);
+
       switch (motivo)
       {
       case LEITURA:
         verifica_leitura(self, processo_bloqueado);
         break;
+        
       case ESCRITA:
         verifica_escrita(self, processo_bloqueado);
         break;
+
       case ESPERANDO_MORTE:
         verifica_morte(self, processo_bloqueado);
         break;
+
       default:
         break;
       }
@@ -529,7 +567,8 @@ double calcula_prioridade(so_t *self, processo_t *processo)
 }
 
 
-int tam_fila(so_t *self){
+int tam_fila(so_t *self)
+{
   int i = 0;
   while (self->fila_prontos[i] != NULL){
     i++;
@@ -562,9 +601,7 @@ static void so_escalona_circular2(so_t *self)
   {
     set_estado(self->processo_corrente, PRONTO);
     set_motivo_bloq(self->processo_corrente, OK);
-    set_a(self->processo_corrente, 0);
     set_prioridade(self->processo_corrente, calcula_prioridade(self, self->processo_corrente));
-    self->processo_corrente->metricas.num_estado[self->processo_corrente->estado]++;
     self->processo_corrente->metricas.preempcoes++;
     adiciona_fila(self, self->processo_corrente);
   }
@@ -574,9 +611,8 @@ static void so_escalona_circular2(so_t *self)
     ordena_fila(self);
     self->processo_corrente = self->fila_prontos[0];
     set_estado(self->processo_corrente, EXECUTANDO);
-    self->processo_corrente->metricas.num_estado[self->processo_corrente->estado]++;
-    remove_fila(self);
     self->quantum = QUANTUM;
+    remove_fila(self);
     return;
   }
   self->processo_corrente = NULL; 
@@ -595,8 +631,7 @@ static void so_escalona_circular(so_t *self)
   {
     set_estado(self->processo_corrente, PRONTO);
     set_motivo_bloq(self->processo_corrente, OK);
-    set_a(self->processo_corrente, 0);
-    self->processo_corrente->metricas.num_estado[self->processo_corrente->estado]++;
+    self->processo_corrente->metricas.preempcoes++;
     adiciona_fila(self, self->processo_corrente);
   }
 
@@ -604,9 +639,8 @@ static void so_escalona_circular(so_t *self)
   {
     self->processo_corrente = self->fila_prontos[0];
     set_estado(self->processo_corrente, EXECUTANDO);
-    self->processo_corrente->metricas.num_estado[self->processo_corrente->estado]++;
-    remove_fila(self);
     self->quantum = QUANTUM;
+    remove_fila(self);
     return;
   }
   self->processo_corrente = NULL; 
@@ -621,13 +655,13 @@ static void so_escalona_base(so_t *self)
   
   if(self->processo_corrente != NULL && self->processo_corrente->estado == EXECUTANDO) return;
 
-  for(int i = 0; i < self->contador_tabela - 1; i++)
+  for(int i = 0; i < self->contador_pid - 1; i++)
   {
-
-    if(self->tabela_processos[i]->estado == PRONTO)
+    processo_t *processo = self->tabela_processos[i];
+    if(processo->estado == PRONTO)
     {
-      self->tabela_processos[i]->estado = EXECUTANDO;
-      self->processo_corrente = self->tabela_processos[i];
+      set_estado(processo, EXECUTANDO);
+      self->processo_corrente = processo;
       return;
     }
   }
@@ -641,9 +675,11 @@ static void so_escalona(so_t *self)
   case ESCALONADOR_BASE:
     so_escalona_base(self);
     break;
+
   case ESCALONADOR_CIRCULAR:
     so_escalona_circular(self);
     break;
+
   case ESCALONADOR_PRIORIDADE:
     so_escalona_circular2(self);
     break;
@@ -709,12 +745,12 @@ static void so_trata_irq_reset(so_t *self)
     self->erro_interno = true;
     return;
   }
-  processo_t *novo_processo = so_inicializa_processo(self->contador_tabela, ender);
+  processo_t *novo_processo = so_inicializa_processo(self->contador_pid, ender);
   self->processo_corrente = novo_processo;
   self->processo_corrente->estado = EXECUTANDO;
-  self->tabela_processos[self->contador_tabela - 1] = novo_processo;
+  self->tabela_processos[self->contador_pid - 1] = novo_processo;
   console_printf("FIZ O PROCESSO INIT");
-  self->contador_tabela++;
+  self->contador_pid++;
 }
 
 // interrupção gerada quando a CPU identifica um erro
@@ -859,7 +895,6 @@ static void so_chamada_escr(so_t *self)
   {
     set_estado(corrente, BLOQUEADO);
     set_motivo_bloq(corrente, ESCRITA);
-    corrente->metricas.num_estado[corrente->estado]++;
     set_prioridade(corrente, calcula_prioridade(self, corrente));
     return;
   }
@@ -908,7 +943,6 @@ void mata_processo(so_t *self, int pid)
   if (processo != NULL) 
   {
     set_estado(processo, MORTO);
-    processo->metricas.num_estado[processo->estado]++;
   }
   set_a(processo, 0);
 }
@@ -934,22 +968,24 @@ static void so_chamada_espera_proc(so_t *self)
 {
   // T1: deveria bloquear o processo se for o caso (e desbloquear na morte do esperado)
   // ainda sem suporte a processos, retorna erro -1
-  int pid_esperado;
   processo_t *corrente = self->processo_corrente;
-  if(corrente != NULL)
+  int pid_esperado = get_x(corrente);
+  processo_t *processo_esperado = so_busca_processo(self, pid_esperado);
+
+  if(processo_esperado == NULL || processo_esperado == corrente)
   {
-    set_estado(corrente, BLOQUEADO);
-    set_motivo_bloq(corrente, ESPERANDO_MORTE);
-    corrente->metricas.num_estado[corrente->estado]++;
-    set_prioridade(corrente, calcula_prioridade(self, corrente));
-    pid_esperado = get_x(self->processo_corrente);
-    set_pid_esp(corrente, pid_esperado);
+    set_a(corrente, -1);
     return;
-  } 
-  
-  //console_printf("SO: SO_ESPERA_PROC não implementada");
- set_a(corrente, -1);
+  }
+
+
+  set_estado(corrente, BLOQUEADO);
+  set_motivo_bloq(corrente, ESPERANDO_MORTE);
+  set_prioridade(corrente, calcula_prioridade(self, corrente));
+  set_pid_esp(corrente, pid_esperado);
+  return;
 }
+
 
 // CARGA DE PROGRAMA {{{1
 

@@ -1,15 +1,16 @@
+#define N_ESTADOS 4
+
 typedef enum motivo_bloqueio {
   OK = 1,
   LEITURA = 2,
   ESCRITA = 3,
   ESPERANDO_MORTE = 4
 }motivo_bloqueio;
-
 typedef enum estado_processo {
-  PRONTO = 1,
-  EXECUTANDO = 2,
-  BLOQUEADO = 3,
-  MORTO = 4
+  PRONTO = 0,
+  EXECUTANDO = 1,
+  BLOQUEADO = 2,
+  MORTO = 3
 }estado_processo;
 
 typedef enum modo_processo {
@@ -20,8 +21,12 @@ typedef enum modo_processo {
 typedef struct metricas_processo {
   int tempo_retorno;
   int preempcoes;
-  int num_estado[3];
-  int tempo_estado[3];
+  int num_estado_pronto;
+  int num_estado_executando;
+  int num_estado_bloqueado;
+  int tempo_estado_pronto;
+  int tempo_estado_executando;
+  int tempo_estado_bloqueado;
   int tempo_resposta;
 } metricas_processo;
 

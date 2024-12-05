@@ -1,0 +1,91 @@
+=====================================================
+               MÉTRICAS DO SISTEMA OPERACIONAL       
+=====================================================
+ Tempo total em execução     : 25245
+ Tempo total ocioso          : 5821
+ Número total de processos   : 4
+ Número total de preempções  : 23
+
+ Interrupções tipo 0         : 1
+ Interrupções tipo 1         : 0
+ Interrupções tipo 2         : 462
+ Interrupções tipo 3         : 503
+ Interrupções tipo 4         : 0
+ Interrupções tipo 5         : 0
+
+=====================================================
+               MÉTRICAS DOS PROCESSOS                
+=====================================================
+-----------------------------------------------------
+ Processo PID                  : 1
+ Tempo de retorno              : 25245
+ Tempo médio de resposta       : 5
+ Número de preempções          : 0
+
+ Estado PRONTO:
+   - Vezes no estado           : 4
+   - Tempo no estado           : 20
+
+ Estado EXECUTANDO:
+   - Vezes no estado           : 3
+   - Tempo no estado           : 743
+
+ Estado BLOQUEADO:
+   - Vezes no estado           : 3
+   - Tempo no estado           : 24482
+-----------------------------------------------------
+-----------------------------------------------------
+ Processo PID                  : 2
+ Tempo de retorno              : 16443
+ Tempo médio de resposta       : 266
+ Número de preempções          : 18
+
+ Estado PRONTO:
+   - Vezes no estado           : 26
+   - Tempo no estado           : 6918
+
+ Estado EXECUTANDO:
+   - Vezes no estado           : 26
+   - Tempo no estado           : 9180
+
+ Estado BLOQUEADO:
+   - Vezes no estado           : 7
+   - Tempo no estado           : 345
+-----------------------------------------------------
+-----------------------------------------------------
+ Processo PID                  : 3
+ Tempo de retorno              : 13280
+ Tempo médio de resposta       : 413
+ Número de preempções          : 3
+
+ Estado PRONTO:
+   - Vezes no estado           : 20
+   - Tempo no estado           : 8267
+
+ Estado EXECUTANDO:
+   - Vezes no estado           : 20
+   - Tempo no estado           : 3786
+
+ Estado BLOQUEADO:
+   - Vezes no estado           : 16
+   - Tempo no estado           : 1227
+-----------------------------------------------------
+-----------------------------------------------------
+ Processo PID                  : 4
+ Tempo de retorno              : 24527
+ Tempo médio de resposta       : 96
+ Número de preempções          : 2
+
+ Estado PRONTO:
+   - Vezes no estado           : 116
+   - Tempo no estado           : 11180
+
+ Estado EXECUTANDO:
+   - Vezes no estado           : 116
+   - Tempo no estado           : 5715
+
+ Estado BLOQUEADO:
+   - Vezes no estado           : 113
+   - Tempo no estado           : 7632
+-----------------------------------------------------
+=====================================================
