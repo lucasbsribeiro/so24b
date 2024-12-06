@@ -18,15 +18,22 @@
 
 // CONSTANTES E TIPOS {{{1
 // intervalo entre interrupções do relógio
+//configurações do SO
 #define INTERVALO_INTERRUPCAO 50   // em instruções executadas
 #define MAX_PROCESSOS 10
 #define QUANTUM 10
-
-#define ESCALONADOR 2
+#define ESCALONADOR 3
 
 #define ESCALONADOR_BASE 1
 #define ESCALONADOR_CIRCULAR 2
-#define ESCALONADOR_PRIORIDADE 3
+#define ESCALONADOR_PRIORITARIO 3
+
+const char *nomes_escalonadores[] = {
+  "escalonador_inválido",
+  "escalonador_base",
+  "escalonador_circular",
+  "escalonador_prioritário"
+};
 
 typedef struct metricas_so {
   int total_processos;
@@ -169,7 +176,7 @@ static void printa_metricas(so_t *self)
 
     // Define o nome do arquivo
     char nome[100];
-    sprintf(nome, "../Metricas/metricas_so_%d.txt", ESCALONADOR);
+    sprintf(nome, "../Relatório e métricas/métricas_so_%s.txt", nomes_escalonadores[ESCALONADOR]);
 
     // Tenta abrir o arquivo
     FILE *arq = fopen(nome, "w");
@@ -337,7 +344,7 @@ void ordena_fila(so_t *self){
   }
 }
 
-static void so_escalona_circular2(so_t *self)
+static void so_escalona_prioritario(so_t *self)
 {
   // escolhe o próximo processo a executar, que passa a ser o processo
   //   corrente; pode continuar sendo o mesmo de antes ou não
@@ -468,13 +475,13 @@ processo_t *so_busca_processo(so_t *self, int pid)
   return NULL;
 }
 
+// funções do so
+
 int so_calcula_terminal(int terminal, int tipo)
 {
   return terminal + tipo;
 }
 
-
-// funções do so
 so_t *so_cria(cpu_t *cpu, mem_t *mem, es_t *es, console_t *console)
 {
   so_t *self = malloc(sizeof(*self));
@@ -528,6 +535,25 @@ void so_destroi(so_t *self)
   free(self);
 }
 
+static int termina_so(so_t *self)
+{
+  err_t e1, e2;
+  e1 = es_escreve(self->es, D_RELOGIO_TIMER, 0);
+  e2 = es_escreve(self->es, D_RELOGIO_INTERRUPCAO, 0);
+  if (e1 != ERR_OK || e2 != ERR_OK)
+  {
+    console_printf("SO: nao consigo desligar o timer!!");
+    self->erro_interno = true;
+  }
+  printa_metricas(self);
+  console_printf("Metricas salvas com sucesso.");
+  console_printf("====================================================");
+  console_printf("           Todos os processos estao mortos.       ");
+  console_printf("         Pressione 'F' para encerrar o SO.    ");
+  console_printf("====================================================");
+
+  return 1;
+}
 
 // TRATAMENTO DE INTERRUPÇÃO {{{1
 
@@ -553,19 +579,6 @@ static int so_despacha(so_t *self);
 //   (e executar o código de usuário) ou executar PARA e ficar suspensa até receber
 //   outra interrupção
 
-static int termina_so(so_t *self)
-{
-  err_t e1, e2;
-  e1 = es_escreve(self->es, D_RELOGIO_TIMER, 0);
-  e2 = es_escreve(self->es, D_RELOGIO_INTERRUPCAO, 0);
-  if (e1 != ERR_OK || e2 != ERR_OK)
-  {
-    console_printf("SO: nao consigo desligar o timer!!");
-    self->erro_interno = true;
-  }
-  printa_metricas(self);
-  return 1;
-}
 
 static int so_trata_interrupcao(void *argC, int reg_a)
 {
@@ -622,7 +635,7 @@ static void so_trata_pendencias(so_t *self)
   {
     processo_t *processo_bloqueado = self->tabela_processos[i];
 
-    if(processo_bloqueado != NULL && processo_bloqueado->estado == BLOQUEADO)
+    if(processo_bloqueado != NULL && get_estado(processo_bloqueado) == BLOQUEADO)
     {
       int motivo = get_motivo_bloq(processo_bloqueado);
 
@@ -659,8 +672,8 @@ static void so_escalona(so_t *self)
     so_escalona_circular(self);
     break;
 
-  case ESCALONADOR_PRIORIDADE:
-    so_escalona_circular2(self);
+  case ESCALONADOR_PRIORITARIO:
+    so_escalona_prioritario(self);
     break;
   
   default:
@@ -814,6 +827,14 @@ static void so_trata_irq_chamada_sistema(so_t *self)
   }
 }
 
+
+static void bloqueia_processo(so_t *self, processo_t *processo, int motivo_bloq)
+{
+  set_estado(processo, BLOQUEADO);
+  set_motivo_bloq(processo, motivo_bloq);
+  set_prioridade(processo, calcula_prioridade(self, processo));
+}
+
 // implementação da chamada se sistema SO_LE
 // faz a leitura de um dado da entrada corrente do processo, coloca o dado no reg A
 static void so_chamada_le(so_t *self)
@@ -824,8 +845,6 @@ static void so_chamada_le(so_t *self)
   //     ser feita mais tarde, em tratamentos pendentes em outra interrupção,
   //     ou diretamente em uma interrupção específica do dispositivo, se for
   //     o caso
-  // implementação lendo direto do terminal A
-  //   T1: deveria usar dispositivo de entrada corrente do processo
   processo_t *corrente = self->processo_corrente;
   int terminal = get_terminal(corrente);
  
@@ -840,9 +859,7 @@ static void so_chamada_le(so_t *self)
 
   if (estado == 0) 
   {
-    set_estado(corrente, BLOQUEADO);
-    set_motivo_bloq(corrente, LEITURA);
-    set_prioridade(corrente, calcula_prioridade(self, corrente));
+    bloqueia_processo(self, corrente, LEITURA);
     return;
   }
 
@@ -873,9 +890,7 @@ static void so_chamada_escr(so_t *self)
 
   if (estado == 0) 
   {
-    set_estado(corrente, BLOQUEADO);
-    set_motivo_bloq(corrente, ESCRITA);
-    set_prioridade(corrente, calcula_prioridade(self, corrente));
+    bloqueia_processo(self, corrente, ESCRITA);
     return;
   }
 
@@ -957,9 +972,7 @@ static void so_chamada_espera_proc(so_t *self)
     return;
   }
 
-  set_estado(corrente, BLOQUEADO);
-  set_motivo_bloq(corrente, ESPERANDO_MORTE);
-  set_prioridade(corrente, calcula_prioridade(self, corrente));
+  bloqueia_processo(self, corrente, ESPERANDO_MORTE);
   set_pid_esp(corrente, pid_esperado);
 }
 
